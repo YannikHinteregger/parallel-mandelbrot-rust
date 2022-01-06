@@ -8,7 +8,6 @@ const IMG_WIDTH: usize = 1023;
 const IMG_HEIGHT: usize = 1023;
 
 fn main() {
-    utils::print_hello();
     let mut buffer: Vec<u32> = vec![0; IMG_WIDTH * IMG_HEIGHT];
 
     let mut window = Window::new(
