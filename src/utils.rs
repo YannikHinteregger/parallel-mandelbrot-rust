@@ -1,6 +1,6 @@
 use rand::prelude::*;
 
-use crate::{IMG_WIDTH, Pixel};
+use crate::{SIDE_LENGTHS, Pixel};
 
 pub fn rgb_to_u32(r: u8, g: u8, b: u8) -> u32 {
     let (r, g, b) = (r as u32, g as u32, b as u32);

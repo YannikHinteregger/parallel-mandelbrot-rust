@@ -14,11 +14,10 @@ mod utils;
 
 const SCALE_X: f64 = -2.0;
 const SCALE_Y: f64 = -1.255;
-const HEIGHT: f64 = 2.5;
+const SCALE_HEIGHT: f64 = 2.5;
 
-const IMG_WIDTH: usize = 1023;
-const IMG_HEIGHT: usize = 1023;
-const IMG_RATIO: f64 = IMG_WIDTH as f64 / IMG_HEIGHT as f64;
+const SIDE_LENGTHS: usize = 1023;
+const IMG_RATIO: f64 = SIDE_LENGTHS as f64 / SIDE_LENGTHS as f64;
 
 // chose any number with to the power of two => n^2 = NUM_BLOCKS
 const NUM_BLOCKS: usize = 128;
@@ -75,9 +74,9 @@ fn work_item_creator(num_blocks: usize, width: usize, height: usize, work_chan: 
     }
 }
 
-fn worker_creator(work_rx: Receiver<WorkItem>, result_tx: Sender<Pixel>) {
+fn worker_creator(work_rx: Receiver<WorkItem>, result_tx: Sender<Pixel>, num_threads: usize) {
     let (status_tx, status_receive) = mpsc::channel();
-    for _ in 0..NUM_THREADS {
+    for _ in 0..num_threads {
         status_tx.send(true);
     }
 
@@ -86,18 +85,18 @@ fn worker_creator(work_rx: Receiver<WorkItem>, result_tx: Sender<Pixel>) {
         if work_item.is_err() { return; }
         let result_tx = result_tx.clone();
         let status_tx = status_tx.clone();
-        let _ = thread::spawn(move || worker(work_item.unwrap(), result_tx, status_tx));
+        let _ = thread::spawn(move || worker(SIDE_LENGTHS, SIDE_LENGTHS, work_item.unwrap(), result_tx, status_tx));
     }
 }
 
-fn worker(work_item: WorkItem, result_tx: Sender<Pixel>, status_tx: Sender<bool>) {
+fn worker(width: usize, height: usize, work_item: WorkItem, result_tx: Sender<Pixel>, status_tx: Sender<bool>) {
     for x in work_item.initial_x..work_item.final_x {
         for y in work_item.initial_y..work_item.final_y {
             let (mut col_r, mut col_g, mut col_b): (u64, u64, u64) = (0, 0, 0);
             for _ in 0..SAMPLES {
-                let a = HEIGHT as f64 * IMG_RATIO * (((x as f64) + rand_f64()) / (IMG_WIDTH as f64)) + SCALE_X;
-                let b = HEIGHT as f64 * (((y as f64) + rand_f64()) / (IMG_HEIGHT as f64)) + SCALE_Y;
-                let (r, iter) = mandelbrot_iteration(a, b);
+                let a = SCALE_HEIGHT as f64 * IMG_RATIO * (((x as f64) + rand_f64()) / (width as f64)) + SCALE_X;
+                let b = SCALE_HEIGHT as f64 * (((y as f64) + rand_f64()) / (height as f64)) + SCALE_Y;
+                let (r, iter) = mandelbrot_iteration(a, b, MAX_ITER);
                 let (r, g, b) = pixel_color(r, iter);
                 col_r += r as u64;
                 col_g += g as u64;
@@ -117,7 +116,6 @@ fn worker(work_item: WorkItem, result_tx: Sender<Pixel>, status_tx: Sender<bool>
             });
         }
     }
-    println!("Done");
     status_tx.send(true);
 }
 
@@ -132,9 +130,9 @@ fn buffer_updater(buffer: Arc<Mutex<Vec<u32>>>, pixel_receive: Receiver<Pixel>, 
     }
 }
 
-fn mandelbrot_iteration(a: f64, b: f64) -> (f64, usize) {
+fn mandelbrot_iteration(a: f64, b: f64, max_iter: usize) -> (f64, usize) {
     let (mut x, mut y, mut xx, mut yy, mut xy): (f64, f64, f64, f64, f64) = (0.0, 0.0, 0.0, 0.0, 0.0);
-    for i in 0..MAX_ITER {
+    for i in 0..max_iter {
         xx = x * x;
         yy = y * y;
         xy = x * y;
@@ -144,19 +142,18 @@ fn mandelbrot_iteration(a: f64, b: f64) -> (f64, usize) {
         x = xx - yy + a;
         y = 2_f64 * xy + b;
     }
-
-    (xx + yy, MAX_ITER)
+    (xx + yy, max_iter)
 }
 
 fn main() {
     println!("Initialise processing...");
-    let mut buff: Vec<u32> = vec![rgb_to_u32(255, 255, 255); IMG_WIDTH * IMG_HEIGHT];
+    let mut buff: Vec<u32> = vec![rgb_to_u32(255, 255, 255); SIDE_LENGTHS * SIDE_LENGTHS];
     let buffer = Arc::new(Mutex::new(buff));
 
     let mut window = Window::new(
         "Mandelbrot - ESC to exit",
-        IMG_WIDTH as usize,
-        IMG_HEIGHT as usize,
+        SIDE_LENGTHS as usize,
+        SIDE_LENGTHS as usize,
         WindowOptions::default(),
     ).unwrap_or_else(|e| {
         panic!("{}", e);
@@ -165,11 +162,11 @@ fn main() {
     let (item_send, item_receive) = mpsc::channel();
     let (result_send, result_receive) = mpsc::channel();
 
-    let _ = thread::spawn(move || work_item_creator(NUM_BLOCKS, IMG_WIDTH, IMG_HEIGHT, item_send));
-    let _ = thread::spawn(move || worker_creator(item_receive, result_send));
+    let _ = thread::spawn(move || work_item_creator(NUM_BLOCKS, SIDE_LENGTHS, SIDE_LENGTHS, item_send));
+    let _ = thread::spawn(move || worker_creator(item_receive, result_send, NUM_THREADS));
 
     let buff_update = buffer.clone();
-    let _ = thread::spawn(move || buffer_updater(buff_update, result_receive, IMG_WIDTH));
+    let _ = thread::spawn(move || buffer_updater(buff_update, result_receive, SIDE_LENGTHS));
 
     window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
 
@@ -181,7 +178,7 @@ fn main() {
             buffer_copy = buffer.lock().unwrap().to_vec();
         }
         // We unwrap here as we want this code to exit if it fails. Real applications may want to handle this in a different way
-        window.update_with_buffer(&buffer_copy, IMG_WIDTH, IMG_HEIGHT)
+        window.update_with_buffer(&buffer_copy, SIDE_LENGTHS, SIDE_LENGTHS)
             .unwrap();
     }
 }
@@ -191,55 +188,50 @@ mod test {
     use std::ops::Deref;
     use super::*;
 
-    fn test_item_creator() {
-        let test_data: [WorkItem; 17] = [
-            WorkItem { initial_x: 0, final_x: 93, initial_y: 0, final_y: 93 },
-            WorkItem { initial_x: 0, final_x: 93, initial_y: 93, final_y: 186 },
-            WorkItem { initial_x: 0, final_x: 93, initial_y: 186, final_y: 279 },
-            WorkItem { initial_x: 0, final_x: 93, initial_y: 279, final_y: 372 },
-            WorkItem { initial_x: 0, final_x: 93, initial_y: 372, final_y: 465 },
-            WorkItem { initial_x: 0, final_x: 93, initial_y: 465, final_y: 558 },
-            WorkItem { initial_x: 0, final_x: 93, initial_y: 558, final_y: 651 },
-            WorkItem { initial_x: 0, final_x: 93, initial_y: 651, final_y: 744 },
-            WorkItem { initial_x: 0, final_x: 93, initial_y: 744, final_y: 837 },
-            WorkItem { initial_x: 0, final_x: 93, initial_y: 837, final_y: 930 },
-            WorkItem { initial_x: 0, final_x: 93, initial_y: 930, final_y: 1023 },
-            WorkItem { initial_x: 93, final_x: 186, initial_y: 0, final_y: 93 },
-            WorkItem { initial_x: 93, final_x: 186, initial_y: 93, final_y: 186 },
-            WorkItem { initial_x: 93, final_x: 186, initial_y: 186, final_y: 279 },
-            WorkItem { initial_x: 93, final_x: 186, initial_y: 279, final_y: 372 },
-            WorkItem { initial_x: 93, final_x: 186, initial_y: 372, final_y: 465 },
-            WorkItem { initial_x: 93, final_x: 186, initial_y: 465, final_y: 558 }
-        ];
+    const TEST_ITEMS: [WorkItem; 10] = [
+        WorkItem { initial_x: 0, final_x: 93, initial_y: 0, final_y: 93 },
+        WorkItem { initial_x: 0, final_x: 93, initial_y: 93, final_y: 186 },
+        WorkItem { initial_x: 0, final_x: 93, initial_y: 186, final_y: 279 },
+        WorkItem { initial_x: 0, final_x: 93, initial_y: 279, final_y: 372 },
+        WorkItem { initial_x: 0, final_x: 93, initial_y: 372, final_y: 465 },
+        WorkItem { initial_x: 0, final_x: 93, initial_y: 465, final_y: 558 },
+        WorkItem { initial_x: 0, final_x: 93, initial_y: 558, final_y: 651 },
+        WorkItem { initial_x: 0, final_x: 93, initial_y: 651, final_y: 744 },
+        WorkItem { initial_x: 0, final_x: 93, initial_y: 744, final_y: 837 },
+        WorkItem { initial_x: 0, final_x: 93, initial_y: 837, final_y: 930 }
+    ];
 
+    const TEST_ITEM: WorkItem = WorkItem { initial_x: 0, final_x: 93, initial_y: 0, final_y: 93 };
+
+    const TEST_PIXELS: [Pixel; 10] = [
+        Pixel { x: 0, y: 0, r: 255, g: 0, b: 85 },
+        Pixel { x: 0, y: 1, r: 255, g: 0, b: 84 },
+        Pixel { x: 0, y: 2, r: 255, g: 0, b: 84 },
+        Pixel { x: 0, y: 3, r: 255, g: 0, b: 84 },
+        Pixel { x: 0, y: 4, r: 255, g: 0, b: 84 },
+        Pixel { x: 0, y: 5, r: 255, g: 0, b: 84 },
+        Pixel { x: 0, y: 6, r: 255, g: 0, b: 84 },
+        Pixel { x: 0, y: 7, r: 255, g: 0, b: 84 },
+        Pixel { x: 0, y: 8, r: 255, g: 0, b: 84 },
+        Pixel { x: 0, y: 9, r: 255, g: 0, b: 84 },
+    ];
+
+    #[test]
+    fn test_item_creator() {
         let (item_tx, item_rx) = mpsc::channel();
-        thread::spawn(move || work_item_creator(1023, 1023, 128, item_tx));
-        for i in 0..test_data.len() {
-            assert!(test_data[i] == item_rx.recv().unwrap())
+        thread::spawn(move || work_item_creator(128, 1023, 1023, item_tx));
+        for i in 0..TEST_ITEMS.len() {
+            assert!(TEST_ITEMS[i] == item_rx.recv().unwrap())
         }
     }
 
     #[test]
     fn test_worker() {
-        let work_item = WorkItem { initial_x: 0, final_x: 93, initial_y: 0, final_y: 93 };
-        let test_data: [Pixel; 10] = [
-            Pixel { x: 0, y: 0, r: 255, g: 0, b: 85 },
-            Pixel { x: 0, y: 1, r: 255, g: 0, b: 84 },
-            Pixel { x: 0, y: 2, r: 255, g: 0, b: 84 },
-            Pixel { x: 0, y: 3, r: 255, g: 0, b: 84 },
-            Pixel { x: 0, y: 4, r: 255, g: 0, b: 84 },
-            Pixel { x: 0, y: 5, r: 255, g: 0, b: 84 },
-            Pixel { x: 0, y: 6, r: 255, g: 0, b: 84 },
-            Pixel { x: 0, y: 7, r: 255, g: 0, b: 84 },
-            Pixel { x: 0, y: 8, r: 255, g: 0, b: 84 },
-            Pixel { x: 0, y: 9, r: 255, g: 0, b: 84 },
-        ];
-
         let (result_tx, result_rx) = mpsc::channel();
         let (status_tx, status_rx) = mpsc::channel();
-        thread::spawn(move || worker(work_item, result_tx, status_tx));
-        for i in 0..test_data.len() {
-            assert!(test_data[i] == result_rx.recv().unwrap())
+        thread::spawn(move || worker(1023, 1023, TEST_ITEM, result_tx, status_tx));
+        for i in 0..TEST_PIXELS.len() {
+            assert!(TEST_PIXELS[i] == result_rx.recv().unwrap())
         }
     }
 
@@ -262,6 +254,27 @@ mod test {
         let locked_buffer = buffer.lock().unwrap();
         for i in 0..result.len() {
             assert_eq!(locked_buffer[i], result[i]);
+        }
+    }
+
+    #[test]
+    fn test_mandelbrot_iteration() {
+        let (r, iter) = mandelbrot_iteration(2_f64, 3_f64, 100);
+        assert!(r == 13_f64 && iter == 1);
+
+        let (r, iter) = mandelbrot_iteration(-0.872475504244032, -0.21588421079467435, 100);
+        assert!(r == 0.8291297520206966 && iter == 100);
+    }
+
+    #[test]
+    fn test_worker_creator() {
+        let (work_tx, work_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+        work_tx.send(TEST_ITEM);
+        std::mem::drop(work_tx);
+        worker_creator(work_rx, result_tx, 1);
+        for pixel in TEST_PIXELS.iter() {
+            assert!(*pixel == result_rx.recv().unwrap())
         }
     }
 }
