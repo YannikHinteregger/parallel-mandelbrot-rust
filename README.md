@@ -1,6 +1,6 @@
 # parallel-mandelbrot-rust
 
-This project features the computation and rendering of the Mandelbrot set to show off the concurrency capabilities of Rust. This code is based on the work of this repository.
+This project features the computation and rendering of the Mandelbrot set to show off the concurrency capabilities of Rust. This code is based on the work of [this repository](https://github.com/GiselaMD/parallel-mandelbrot-go).
 
 ## Executing
 To run the project use `cargo run --release`
