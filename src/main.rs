@@ -16,15 +16,15 @@ const SCALE_X: f64 = -2.0;
 const SCALE_Y: f64 = -1.255;
 const SCALE_HEIGHT: f64 = 2.5;
 
-const SIDE_LENGTHS: usize = 1023;
-const IMG_RATIO: f64 = SIDE_LENGTHS as f64 / SIDE_LENGTHS as f64;
-
-// chose any number with to the power of two => n^2 = NUM_BLOCKS
-const NUM_BLOCKS: usize = 128;
-const NUM_THREADS: usize = 10;
-
-const SAMPLES: usize = 200;
-const MAX_ITER: usize = 500;
+#[derive(Clone, Copy)]
+struct Config {
+    side_lengths: usize,
+    img_ratio: f64,
+    num_blocks: usize,
+    num_threads: usize,
+    samples: usize,
+    max_iter: usize,
+}
 
 pub struct Pixel {
     x: usize,
@@ -60,23 +60,23 @@ impl PartialEq for WorkItem {
     }
 }
 
-fn work_item_creator(num_blocks: usize, width: usize, height: usize, work_chan: Sender<WorkItem>) {
-    let sqrt = (num_blocks as f64).sqrt() as usize;
+fn work_item_creator(work_chan: Sender<WorkItem>, config: Config) {
+    let sqrt = (config.num_blocks as f64).sqrt() as usize;
     for i in 0..sqrt {
         for j in 0..sqrt {
             work_chan.send(WorkItem {
-                initial_x: i * (width / sqrt),
-                final_x: (i + 1) * (width / sqrt),
-                initial_y: j * (height / sqrt),
-                final_y: (j + 1) * (height / sqrt),
+                initial_x: i * (config.side_lengths / sqrt),
+                final_x: (i + 1) * (config.side_lengths / sqrt),
+                initial_y: j * (config.side_lengths / sqrt),
+                final_y: (j + 1) * (config.side_lengths / sqrt),
             });
         }
     }
 }
 
-fn worker_creator(work_rx: Receiver<WorkItem>, result_tx: Sender<Pixel>, num_threads: usize) {
+fn worker_creator(work_rx: Receiver<WorkItem>, result_tx: Sender<Pixel>, config: Config) {
     let (status_tx, status_receive) = mpsc::channel();
-    for _ in 0..num_threads {
+    for _ in 0..config.num_threads {
         status_tx.send(true);
     }
 
@@ -85,27 +85,27 @@ fn worker_creator(work_rx: Receiver<WorkItem>, result_tx: Sender<Pixel>, num_thr
         if work_item.is_err() { return; }
         let result_tx = result_tx.clone();
         let status_tx = status_tx.clone();
-        let _ = thread::spawn(move || worker(SIDE_LENGTHS, SIDE_LENGTHS, work_item.unwrap(), result_tx, status_tx));
+        let _ = thread::spawn(move || worker(work_item.unwrap(), result_tx, status_tx, config));
     }
 }
 
-fn worker(width: usize, height: usize, work_item: WorkItem, result_tx: Sender<Pixel>, status_tx: Sender<bool>) {
+fn worker(work_item: WorkItem, result_tx: Sender<Pixel>, status_tx: Sender<bool>, config: Config) {
     for x in work_item.initial_x..work_item.final_x {
         for y in work_item.initial_y..work_item.final_y {
             let (mut col_r, mut col_g, mut col_b): (u64, u64, u64) = (0, 0, 0);
-            for _ in 0..SAMPLES {
-                let a = SCALE_HEIGHT as f64 * IMG_RATIO * (((x as f64) + rand_f64()) / (width as f64)) + SCALE_X;
-                let b = SCALE_HEIGHT as f64 * (((y as f64) + rand_f64()) / (height as f64)) + SCALE_Y;
-                let (r, iter) = mandelbrot_iteration(a, b, MAX_ITER);
+            for _ in 0..config.samples {
+                let a = SCALE_HEIGHT as f64 * config.img_ratio * (((x as f64) + rand_f64()) / (config.side_lengths as f64)) + SCALE_X;
+                let b = SCALE_HEIGHT as f64 * (((y as f64) + rand_f64()) / (config.side_lengths as f64)) + SCALE_Y;
+                let (r, iter) = mandelbrot_iteration(a, b, config.max_iter);
                 let (r, g, b) = pixel_color(r, iter);
                 col_r += r as u64;
                 col_g += g as u64;
                 col_b += b as u64;
             }
             let (cr, cg, cb): (u8, u8, u8);
-            cr = ((col_r as f64) / (SAMPLES as f64)) as u8;
-            cg = ((col_g as f64) / (SAMPLES as f64)) as u8;
-            cb = ((col_b as f64) / (SAMPLES as f64)) as u8;
+            cr = ((col_r as f64) / (config.samples as f64)) as u8;
+            cg = ((col_g as f64) / (config.samples as f64)) as u8;
+            cb = ((col_b as f64) / (config.samples as f64)) as u8;
 
             result_tx.send(Pixel {
                 x,
@@ -119,9 +119,9 @@ fn worker(width: usize, height: usize, work_item: WorkItem, result_tx: Sender<Pi
     status_tx.send(true);
 }
 
-fn buffer_updater(buffer: Arc<Mutex<Vec<u32>>>, pixel_receive: Receiver<Pixel>, width: usize) {
+fn buffer_updater(buffer: Arc<Mutex<Vec<u32>>>, pixel_receive: Receiver<Pixel>, config: Config) {
     for pixel in pixel_receive.iter() {
-        let (idx, color) = pixel_to_values(pixel, width);
+        let (idx, color) = pixel_to_values(pixel, config.side_lengths);
         let buffer = buffer.clone();
         {
             let mut guard = buffer.lock().unwrap();
@@ -146,14 +146,23 @@ fn mandelbrot_iteration(a: f64, b: f64, max_iter: usize) -> (f64, usize) {
 }
 
 fn main() {
+    let config = Config {
+        side_lengths: 1023,
+        img_ratio: 1023_f64 / 1023_f64,
+        num_blocks: 128,
+        num_threads: 10,
+        samples: 200,
+        max_iter: 500,
+    };
+
     println!("Initialise processing...");
-    let mut buff: Vec<u32> = vec![rgb_to_u32(255, 255, 255); SIDE_LENGTHS * SIDE_LENGTHS];
+    let mut buff: Vec<u32> = vec![rgb_to_u32(255, 255, 255); config.side_lengths * config.side_lengths];
     let buffer = Arc::new(Mutex::new(buff));
 
     let mut window = Window::new(
         "Mandelbrot - ESC to exit",
-        SIDE_LENGTHS as usize,
-        SIDE_LENGTHS as usize,
+        config.side_lengths,
+        config.side_lengths,
         WindowOptions::default(),
     ).unwrap_or_else(|e| {
         panic!("{}", e);
@@ -162,11 +171,11 @@ fn main() {
     let (item_send, item_receive) = mpsc::channel();
     let (result_send, result_receive) = mpsc::channel();
 
-    let _ = thread::spawn(move || work_item_creator(NUM_BLOCKS, SIDE_LENGTHS, SIDE_LENGTHS, item_send));
-    let _ = thread::spawn(move || worker_creator(item_receive, result_send, NUM_THREADS));
+    let _ = thread::spawn(move || work_item_creator(item_send, config));
+    let _ = thread::spawn(move || worker_creator(item_receive, result_send, config));
 
     let buff_update = buffer.clone();
-    let _ = thread::spawn(move || buffer_updater(buff_update, result_receive, SIDE_LENGTHS));
+    let _ = thread::spawn(move || buffer_updater(buff_update, result_receive, config));
 
     window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
 
@@ -178,7 +187,7 @@ fn main() {
             buffer_copy = buffer.lock().unwrap().to_vec();
         }
         // We unwrap here as we want this code to exit if it fails. Real applications may want to handle this in a different way
-        window.update_with_buffer(&buffer_copy, SIDE_LENGTHS, SIDE_LENGTHS)
+        window.update_with_buffer(&buffer_copy, config.side_lengths, config.side_lengths)
             .unwrap();
     }
 }
@@ -216,10 +225,19 @@ mod test {
         Pixel { x: 0, y: 9, r: 255, g: 0, b: 84 },
     ];
 
+    const CONFIG: Config = Config {
+        side_lengths: 1023,
+        img_ratio: 1023_f64 / 1023_f64,
+        num_blocks: 128,
+        num_threads: 1,
+        samples: 200,
+        max_iter: 500,
+    };
+
     #[test]
     fn test_item_creator() {
         let (item_tx, item_rx) = mpsc::channel();
-        thread::spawn(move || work_item_creator(128, 1023, 1023, item_tx));
+        thread::spawn(move || work_item_creator(item_tx, CONFIG));
         for i in 0..TEST_ITEMS.len() {
             assert!(TEST_ITEMS[i] == item_rx.recv().unwrap())
         }
@@ -227,9 +245,10 @@ mod test {
 
     #[test]
     fn test_worker() {
+
         let (result_tx, result_rx) = mpsc::channel();
         let (status_tx, status_rx) = mpsc::channel();
-        thread::spawn(move || worker(1023, 1023, TEST_ITEM, result_tx, status_tx));
+        thread::spawn(move || worker(TEST_ITEM, result_tx, status_tx, CONFIG));
         for i in 0..TEST_PIXELS.len() {
             assert!(TEST_PIXELS[i] == result_rx.recv().unwrap())
         }
@@ -237,7 +256,17 @@ mod test {
 
     #[test]
     fn test_buffer_updater() {
-        let size = 100;
+        let config: Config = Config {
+            side_lengths: 100,
+            img_ratio: 100_f64 / 100_f64,
+            num_blocks: 128,
+            num_threads: 1,
+            samples: 200,
+            max_iter: 500,
+        };
+
+        let size = config.side_lengths;
+
         let mut buff = vec![rgb_to_u32(255, 255, 255); size * size];
         let buffer = Arc::new(Mutex::new(buff));
 
@@ -250,7 +279,7 @@ mod test {
             }
         }
         std::mem::drop(pixel_tx);
-        buffer_updater(buffer.clone(), pixel_rx, size);
+        buffer_updater(buffer.clone(), pixel_rx, config);
         let locked_buffer = buffer.lock().unwrap();
         for i in 0..result.len() {
             assert_eq!(locked_buffer[i], result[i]);
@@ -272,7 +301,7 @@ mod test {
         let (result_tx, result_rx) = mpsc::channel();
         work_tx.send(TEST_ITEM);
         std::mem::drop(work_tx);
-        worker_creator(work_rx, result_tx, 1);
+        worker_creator(work_rx, result_tx, CONFIG);
         for pixel in TEST_PIXELS.iter() {
             assert!(*pixel == result_rx.recv().unwrap())
         }
