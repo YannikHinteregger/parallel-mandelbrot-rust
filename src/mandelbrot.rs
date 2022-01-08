@@ -130,7 +130,6 @@ pub fn mandelbrot_iteration(a: f64, b: f64, max_iter: usize) -> (f64, usize) {
 
 #[cfg(test)]
 mod test {
-    use std::ops::Deref;
     use std::sync::{Arc, mpsc, Mutex};
     use std::thread;
     use crate::rgb_to_u32;
@@ -186,7 +185,7 @@ mod test {
     fn test_worker() {
 
         let (result_tx, result_rx) = mpsc::channel();
-        let (status_tx, status_rx) = mpsc::channel();
+        let (status_tx, _status_rx) = mpsc::channel();
         thread::spawn(move || worker(TEST_ITEM, result_tx, status_tx, CONFIG));
         for i in 0..TEST_PIXELS.len() {
             assert!(TEST_PIXELS[i] == result_rx.recv().unwrap())
@@ -206,7 +205,7 @@ mod test {
 
         let size = config.side_lengths;
 
-        let mut buff = vec![rgb_to_u32(255, 255, 255); size * size];
+        let buff = vec![rgb_to_u32(255, 255, 255); size * size];
         let buffer = Arc::new(Mutex::new(buff));
 
         let (pixel_tx, pixel_rx) = mpsc::channel();
@@ -214,7 +213,7 @@ mod test {
         let result: Vec<u32> = vec![0; size * size];
         for x in 0..size {
             for y in 0..size {
-                pixel_tx.send(Pixel { x, y, r: 0, g: 0, b: 0 });
+                let _ = pixel_tx.send(Pixel { x, y, r: 0, g: 0, b: 0 });
             }
         }
         std::mem::drop(pixel_tx);
@@ -238,7 +237,7 @@ mod test {
     fn test_worker_creator() {
         let (work_tx, work_rx) = mpsc::channel();
         let (result_tx, result_rx) = mpsc::channel();
-        work_tx.send(TEST_ITEM);
+        let _ = work_tx.send(TEST_ITEM);
         std::mem::drop(work_tx);
         worker_creator(work_rx, result_tx, CONFIG);
         for pixel in TEST_PIXELS.iter() {
