@@ -61,10 +61,8 @@ pub fn hue_to_color_chan(p: f64, q: f64, mut t: f64) -> u8 {
     (ret_val * 255_f64) as u8
 }
 
-pub fn pixel_to_values(pixel: Pixel) -> (usize, u32) {
-    let idx = IMG_WIDTH * (pixel.y) + pixel.x;
+pub fn pixel_to_values(pixel: Pixel, width: usize) -> (usize, u32) {
+    let idx = width * (pixel.y) + pixel.x;
     let color = rgb_to_u32(pixel.r, pixel.g, pixel.b);
-    // println!("{} {}", pixel.x, pixel.y);
-    // println!("{} {}", idx, color);
     (idx, color)
 }
