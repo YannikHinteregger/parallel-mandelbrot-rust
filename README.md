@@ -2,6 +2,10 @@
 
 This project features the computation and rendering of the Mandelbrot set to show off the concurrency capabilities of Rust. This code is based on the work of [this repository](https://github.com/GiselaMD/parallel-mandelbrot-go).
 
+<p align="center">
+    <img width="500" src="render.gif"/>
+</p>
+
 ## Executing
 To run the project use `cargo run --release`
 
