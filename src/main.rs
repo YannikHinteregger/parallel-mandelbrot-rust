@@ -64,14 +64,14 @@ fn main() {
         panic!("{}", e);
     });
 
-    let (item_send, item_receive) = mpsc::channel();
-    let (result_send, result_receive) = mpsc::channel();
+    let (item_tx, item_rx) = mpsc::channel();
+    let (result_tx, result_rx) = mpsc::channel();
+    let (status_tx, status_rx) = mpsc::channel();
 
-    let _ = thread::spawn(move || work_item_creator(item_send, config));
-    let _ = thread::spawn(move || worker_creator(item_receive, result_send, config));
-
-    let buff_update = buffer.clone();
-    let _ = thread::spawn(move || buffer_updater(buff_update, result_receive, config));
+    let _ = thread::spawn(move || work_item_creator(item_tx, config));
+    let _ = thread::spawn(move || worker_creator(item_rx, result_tx, config));
+    let buffer_clone = buffer.clone();
+    let _ = thread::spawn(move || buffer_updater(buffer_clone, result_rx, status_tx, config));
 
     window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
 
@@ -82,8 +82,11 @@ fn main() {
         {
             buffer_copy = buffer.lock().unwrap().to_vec();
         }
-        // We unwrap here as we want this code to exit if it fails. Real applications may want to handle this in a different way
+
         window.update_with_buffer(&buffer_copy, config.side_lengths, config.side_lengths)
             .unwrap();
+        if status_rx.try_recv().is_ok() {
+            println!("Done rendering!")
+        }
     }
 }

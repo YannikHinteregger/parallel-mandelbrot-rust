@@ -70,7 +70,12 @@ pub fn worker_creator(work_rx: Receiver<WorkItem>, result_tx: Sender<Pixel>, con
     }
 }
 
-pub fn worker(work_item: WorkItem, result_tx: Sender<Pixel>, status_tx: Sender<bool>, config: Config) {
+pub fn worker(
+    work_item: WorkItem,
+    result_tx: Sender<Pixel>,
+    status_tx: Sender<bool>,
+    config: Config)
+{
     for x in work_item.initial_x..work_item.final_x {
         for y in work_item.initial_y..work_item.final_y {
             let (mut col_r, mut col_g, mut col_b): (u64, u64, u64) = (0, 0, 0);
@@ -100,8 +105,13 @@ pub fn worker(work_item: WorkItem, result_tx: Sender<Pixel>, status_tx: Sender<b
     let _ = status_tx.send(true);
 }
 
-pub fn buffer_updater(buffer: Arc<Mutex<Vec<u32>>>, pixel_receive: Receiver<Pixel>, config: Config) {
-    for pixel in pixel_receive.iter() {
+pub fn buffer_updater(
+    buffer: Arc<Mutex<Vec<u32>>>,
+    pixel_rx: Receiver<Pixel>,
+    status_tx: Sender<bool>,
+    config: Config)
+{
+    for pixel in pixel_rx.iter() {
         let (idx, color) = pixel_to_values(pixel, config.side_lengths);
         let buffer = buffer.clone();
         {
@@ -109,10 +119,11 @@ pub fn buffer_updater(buffer: Arc<Mutex<Vec<u32>>>, pixel_receive: Receiver<Pixe
             guard[idx] = color;
         }
     }
+    let _ = status_tx.send(true);
 }
 
 pub fn mandelbrot_iteration(a: f64, b: f64, max_iter: usize) -> (f64, usize) {
-    let (mut x, mut y, mut xx, mut yy) : (f64, f64, f64, f64) = (0.0, 0.0, 0.0, 0.0);
+    let (mut x, mut y, mut xx, mut yy): (f64, f64, f64, f64) = (0.0, 0.0, 0.0, 0.0);
     let mut xy: f64;
     for i in 0..max_iter {
         xx = x * x;
@@ -183,7 +194,6 @@ mod test {
 
     #[test]
     fn test_worker() {
-
         let (result_tx, result_rx) = mpsc::channel();
         let (status_tx, _status_rx) = mpsc::channel();
         thread::spawn(move || worker(TEST_ITEM, result_tx, status_tx, CONFIG));
@@ -209,6 +219,7 @@ mod test {
         let buffer = Arc::new(Mutex::new(buff));
 
         let (pixel_tx, pixel_rx) = mpsc::channel();
+        let (status_tx, status_rx) = mpsc::channel();
 
         let result: Vec<u32> = vec![0; size * size];
         for x in 0..size {
@@ -217,11 +228,12 @@ mod test {
             }
         }
         std::mem::drop(pixel_tx);
-        buffer_updater(buffer.clone(), pixel_rx, config);
+        buffer_updater(buffer.clone(), pixel_rx, status_tx, config);
         let locked_buffer = buffer.lock().unwrap();
         for i in 0..result.len() {
             assert_eq!(locked_buffer[i], result[i]);
         }
+        assert!(status_rx.recv().unwrap())
     }
 
     #[test]
