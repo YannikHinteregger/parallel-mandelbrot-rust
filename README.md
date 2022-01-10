@@ -37,6 +37,6 @@ OPTIONS:
 
 ## Dependencies
 
-To render the set this project uses the library minifb and has only been tested on Windows for this project.
+To render the set this project uses the library minifb and has only been tested on Windows in the context of this project.
 If problems occur on any other OS, have a look at the [Github repository of minifb](https://github.com/emoon/rust_minifb#build-instructions)
 
