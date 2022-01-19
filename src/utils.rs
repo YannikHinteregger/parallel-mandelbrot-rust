@@ -61,9 +61,6 @@ pub fn hue_to_color_chan(p: f64, q: f64, mut t: f64) -> u8 {
 }
 
 pub fn pixel_to_values(pixel: Pixel, width: usize) -> (usize, u32) {
-    if rand_f64() < 0.00001 {
-        println!("{} {} {} {} {} {}", pixel.x, pixel.y, pixel.r, pixel.g, pixel.b, width);
-    }
     let idx = width * (pixel.y) + pixel.x;
     let color = rgb_to_u32(pixel.r, pixel.g, pixel.b);
     (idx, color)
